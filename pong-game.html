@@ -137,23 +137,13 @@
                 font-size: 12px;
             }
         }
-
-        @keyframes fadeIn {
-            from { opacity: 0; }
-            to { opacity: 1; }
-        }
-
-        @keyframes scaleIn {
-            from { transform: scale(0.5); opacity: 0; }
-            to { transform: scale(1); opacity: 1; }
-        }
     </style>
 </head>
 <body>
     <button class="skip-button" id="skipButton">SKIP →</button>
     <div class="container">
         <h1>🎮 PONG GAME 🎮</h1>
-        <canvas id="pongCanvas"></canvas>
+        <canvas id="pongCanvas" width="800" height="400"></canvas>
         <div class="scoreboard">
             <div class="player-score">Player: <span id="playerScore">0</span></div>
             <div class="computer-score">Computer: <span id="computerScore">0</span></div>
@@ -182,10 +172,16 @@
         let cutsceneTime = 0;
 
         // Web Audio API for sound effects
-        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        let audioContext;
+        function initAudio() {
+            if (!audioContext) {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            }
+        }
 
         function playBeep(frequency, duration) {
             try {
+                initAudio();
                 const oscillator = audioContext.createOscillator();
                 const gainNode = audioContext.createGain();
                 
@@ -376,6 +372,7 @@
                 ctx.fillStyle = '#FF4500';
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'middle';
+                ctx.globalAlpha = 1;
                 
                 const messages = [
                     'YOU ARE MINE NOW!',
@@ -415,6 +412,7 @@
                 const stageProgress = (cutsceneTime - 420) / 60;
                 const remaining = Math.ceil(3 * (1 - stageProgress));
 
+                ctx.globalAlpha = 1;
                 ctx.font = `bold ${80}px Arial`;
                 ctx.fillStyle = remaining <= 1 ? '#00FF00' : '#FFFF00';
                 ctx.textAlign = 'center';
@@ -430,6 +428,9 @@
                     ctx.fillText('LET\'S GO!', canvas.width / 2, canvas.height / 2);
                     playBeep(1500, 0.15);
                 }
+
+                ctx.shadowColor = 'transparent';
+                ctx.shadowBlur = 0;
             }
         }
 
@@ -869,6 +870,7 @@
         }
 
         skipButton.addEventListener('click', skipCutscene);
+        canvas.addEventListener('click', skipCutscene);
 
         let gameFrames = 0;
         function gameLoop() {
@@ -898,8 +900,8 @@
             requestAnimationFrame(gameLoop);
         }
 
-        // Start game with cutscene
-        gameLoop();
+        // Start game with cutscene after a small delay to ensure canvas is ready
+        setTimeout(gameLoop, 100);
     </script>
 </body>
 </html>
