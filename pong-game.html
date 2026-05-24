@@ -99,6 +99,25 @@
             justify-content: center;
         }
 
+        .skip-button {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            padding: 10px 20px;
+            background-color: rgba(255, 255, 255, 0.3);
+            color: white;
+            border: 2px solid white;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            display: none;
+            z-index: 1000;
+        }
+
+        .skip-button:hover {
+            background-color: rgba(255, 255, 255, 0.5);
+        }
+
         @media (max-width: 768px) {
             .container {
                 padding: 5px;
@@ -112,10 +131,26 @@
             .instructions p {
                 font-size: 0.75em;
             }
+
+            .skip-button {
+                padding: 8px 15px;
+                font-size: 12px;
+            }
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        @keyframes scaleIn {
+            from { transform: scale(0.5); opacity: 0; }
+            to { transform: scale(1); opacity: 1; }
         }
     </style>
 </head>
 <body>
+    <button class="skip-button" id="skipButton">SKIP →</button>
     <div class="container">
         <h1>🎮 PONG GAME 🎮</h1>
         <canvas id="pongCanvas"></canvas>
@@ -135,12 +170,46 @@
         const canvas = document.getElementById('pongCanvas');
         const ctx = canvas.getContext('2d');
         const disasterInfo = document.getElementById('disasterInfo');
+        const skipButton = document.getElementById('skipButton');
+
+        // Game states
+        const GAME_STATE = {
+            CUTSCENE: 'cutscene',
+            PLAYING: 'playing'
+        };
+
+        let gameState = GAME_STATE.CUTSCENE;
+        let cutsceneTime = 0;
+
+        // Web Audio API for sound effects
+        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+
+        function playBeep(frequency, duration) {
+            try {
+                const oscillator = audioContext.createOscillator();
+                const gainNode = audioContext.createGain();
+                
+                oscillator.connect(gainNode);
+                gainNode.connect(audioContext.destination);
+                
+                oscillator.frequency.value = frequency;
+                oscillator.type = 'sine';
+                
+                gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + duration);
+                
+                oscillator.start(audioContext.currentTime);
+                oscillator.stop(audioContext.currentTime + duration);
+            } catch (e) {
+                // Audio context error - silently continue
+            }
+        }
 
         // Responsive canvas sizing
         function resizeCanvas() {
             const maxWidth = Math.min(window.innerWidth - 20, 800);
             const maxHeight = Math.min(window.innerHeight - 280, 400);
-            const ratio = 2; // width to height ratio
+            const ratio = 2;
             
             if (maxWidth / ratio <= maxHeight) {
                 canvas.width = maxWidth;
@@ -157,12 +226,218 @@
             setTimeout(resizeCanvas, 100);
         });
 
+        // Draw monster
+        function drawMonster(x, y, scale, opacity) {
+            ctx.save();
+            ctx.globalAlpha = opacity;
+            ctx.translate(x, y);
+            ctx.scale(scale, scale);
+
+            // Body (large circle)
+            ctx.fillStyle = '#8B008B';
+            ctx.beginPath();
+            ctx.arc(0, 0, 40, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Eyes
+            ctx.fillStyle = '#FF4500';
+            ctx.beginPath();
+            ctx.arc(-15, -15, 12, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.beginPath();
+            ctx.arc(15, -15, 12, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Pupils
+            ctx.fillStyle = '#000000';
+            ctx.beginPath();
+            ctx.arc(-15, -15, 6, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.beginPath();
+            ctx.arc(15, -15, 6, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Mouth (evil grin)
+            ctx.strokeStyle = '#FF4500';
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.arc(0, 5, 15, 0.2, Math.PI - 0.2);
+            ctx.stroke();
+
+            // Teeth
+            ctx.strokeStyle = '#FFFFFF';
+            ctx.lineWidth = 1;
+            for (let i = -15; i <= 15; i += 6) {
+                ctx.beginPath();
+                ctx.moveTo(i, 5);
+                ctx.lineTo(i, 15);
+                ctx.stroke();
+            }
+
+            // Horns
+            ctx.strokeStyle = '#8B008B';
+            ctx.lineWidth = 4;
+            ctx.beginPath();
+            ctx.moveTo(-25, -40);
+            ctx.lineTo(-35, -60);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(25, -40);
+            ctx.lineTo(35, -60);
+            ctx.stroke();
+
+            // Spikes on body
+            ctx.fillStyle = '#FF4500';
+            for (let angle = 0; angle < Math.PI * 2; angle += Math.PI / 4) {
+                const sx = Math.cos(angle) * 45;
+                const sy = Math.sin(angle) * 45;
+                ctx.beginPath();
+                ctx.arc(sx, sy, 5, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
+            ctx.restore();
+        }
+
+        // Cutscene drawing functions
+        function drawCutscene() {
+            ctx.fillStyle = '#000';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Stage 0: Dark intro with text (0-60)
+            if (cutsceneTime < 60) {
+                const stageProgress = cutsceneTime / 60;
+                ctx.fillStyle = `rgba(255, 0, 0, ${stageProgress * 0.2})`;
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                
+                ctx.globalAlpha = Math.sin(stageProgress * Math.PI) * 0.7;
+                ctx.font = 'bold 24px Arial';
+                ctx.fillStyle = '#FF4500';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText('A creature awakens...', canvas.width / 2, canvas.height / 2);
+            }
+
+            // Stage 1: Monster appears (60-150)
+            if (cutsceneTime >= 60 && cutsceneTime < 150) {
+                const stageProgress = (cutsceneTime - 60) / 90;
+                ctx.fillStyle = `rgba(255, 0, 0, ${0.1 + stageProgress * 0.2})`;
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+                const scale = 0.2 + stageProgress * 0.8;
+                const opacity = Math.min(1, stageProgress * 2);
+                const monsterY = canvas.height / 2 + Math.sin(stageProgress * Math.PI) * 30;
+                
+                drawMonster(canvas.width / 2, monsterY, scale, opacity);
+
+                playBeep(200 + stageProgress * 300, 0.05);
+            }
+
+            // Stage 2: Monster roars (150-210)
+            if (cutsceneTime >= 150 && cutsceneTime < 210) {
+                const stageProgress = (cutsceneTime - 150) / 60;
+                ctx.fillStyle = `rgba(255, 0, 0, ${0.3})`;
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+                const shakeX = (Math.random() - 0.5) * 20 * (1 - stageProgress);
+                const shakeY = (Math.random() - 0.5) * 20 * (1 - stageProgress);
+                drawMonster(canvas.width / 2 + shakeX, canvas.height / 2 + shakeY, 1, 1);
+
+                // Roar effect
+                ctx.globalAlpha = 1 - stageProgress;
+                ctx.strokeStyle = '#FF4500';
+                ctx.lineWidth = 3;
+                for (let i = 0; i < 3; i++) {
+                    ctx.beginPath();
+                    ctx.arc(canvas.width / 2, canvas.height / 2, 60 + i * 30 + stageProgress * 80, 0, Math.PI * 2);
+                    ctx.stroke();
+                }
+
+                playBeep(150, 0.1);
+            }
+
+            // Stage 3: Evil laugh with message (210-330)
+            if (cutsceneTime >= 210 && cutsceneTime < 330) {
+                const stageProgress = (cutsceneTime - 210) / 120;
+                ctx.fillStyle = `rgba(255, 0, 0, ${0.2})`;
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+                const bobY = Math.sin(cutsceneTime * 0.1) * 10;
+                drawMonster(canvas.width / 2, canvas.height / 2.5 + bobY, 1, 1);
+
+                // Speech bubble
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+                ctx.fillRect(canvas.width / 2 - 150, canvas.height * 0.65, 300, 80);
+                ctx.strokeStyle = '#FF4500';
+                ctx.lineWidth = 2;
+                ctx.strokeRect(canvas.width / 2 - 150, canvas.height * 0.65, 300, 80);
+
+                ctx.font = 'bold 18px Arial';
+                ctx.fillStyle = '#FF4500';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                
+                const messages = [
+                    'YOU ARE MINE NOW!',
+                    'TRAPPED IN MY GAME!',
+                    'SURVIVE THE CHAOS!'
+                ];
+                const messageIndex = Math.floor(stageProgress * 3) % 3;
+                ctx.fillText(messages[messageIndex], canvas.width / 2, canvas.height * 0.7);
+
+                playBeep(100 + Math.sin(cutsceneTime * 0.1) * 100, 0.05);
+            }
+
+            // Stage 4: The challenge begins (330-420)
+            if (cutsceneTime >= 330 && cutsceneTime < 420) {
+                const stageProgress = (cutsceneTime - 330) / 90;
+                ctx.fillStyle = `rgba(255, 0, 0, ${0.2 * (1 - stageProgress)})`;
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+                const scale = 1 + stageProgress * 0.5;
+                const opacity = 1 - stageProgress;
+                drawMonster(canvas.width / 2, canvas.height / 2.5, scale, opacity);
+
+                ctx.globalAlpha = Math.sin(stageProgress * Math.PI) * 0.8;
+                ctx.font = 'bold 20px Arial';
+                ctx.fillStyle = '#FFFFFF';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText('BATTLE FOR YOUR FREEDOM!', canvas.width / 2, canvas.height * 0.2);
+
+                ctx.font = 'bold 16px Arial';
+                ctx.fillStyle = '#00FF00';
+                ctx.fillText('Face the natural disasters...', canvas.width / 2, canvas.height * 0.85);
+            }
+
+            // Stage 5: Final countdown (420-480)
+            if (cutsceneTime >= 420) {
+                const stageProgress = (cutsceneTime - 420) / 60;
+                const remaining = Math.ceil(3 * (1 - stageProgress));
+
+                ctx.font = `bold ${80}px Arial`;
+                ctx.fillStyle = remaining <= 1 ? '#00FF00' : '#FFFF00';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.shadowColor = '#FFFFFF';
+                ctx.shadowBlur = 30;
+                
+                if (remaining > 0) {
+                    ctx.fillText(remaining, canvas.width / 2, canvas.height / 2);
+                    playBeep(1000 + remaining * 200, 0.1);
+                } else {
+                    ctx.fillStyle = '#00FF00';
+                    ctx.fillText('LET\'S GO!', canvas.width / 2, canvas.height / 2);
+                    playBeep(1500, 0.15);
+                }
+            }
+        }
+
         // Game objects
         const paddleWidth = 10;
         const paddleHeight = 80;
         const ballSize = 8;
 
-        // Player paddle (left side)
         const playerPaddle = {
             x: 10,
             y: canvas.height / 2 - paddleHeight / 2,
@@ -176,7 +451,6 @@
             targetY: canvas.height / 2 - paddleHeight / 2
         };
 
-        // Computer paddle (right side)
         const computerPaddle = {
             x: canvas.width - paddleWidth - 10,
             y: canvas.height / 2 - paddleHeight / 2,
@@ -188,7 +462,6 @@
             shakingIntensity: 0
         };
 
-        // Ball
         const ball = {
             x: canvas.width / 2,
             y: canvas.height / 2,
@@ -200,16 +473,13 @@
             slowedDuration: 0
         };
 
-        // Disasters array
         let disasters = [];
         let tsunamiActive = false;
         let tsunamiSlowDuration = 0;
 
-        // Score
         let playerScore = 0;
         let computerScore = 0;
 
-        // Keyboard input
         const keys = {};
         window.addEventListener('keydown', (e) => {
             keys[e.key] = true;
@@ -218,7 +488,6 @@
             keys[e.key] = false;
         });
 
-        // Touch input for mobile
         let touchStartY = 0;
         let touchEndY = 0;
 
@@ -235,7 +504,6 @@
             playerPaddle.targetY = touchY - paddleHeight / 2;
         }, false);
 
-        // Mouse input for desktop
         document.addEventListener('mousemove', (e) => {
             if (!canvas.getBoundingClientRect) return;
             const rect = canvas.getBoundingClientRect();
@@ -245,7 +513,6 @@
             }
         });
 
-        // Constrain paddle to canvas
         function constrainPaddle(paddle) {
             if (paddle.y < 0) {
                 paddle.y = 0;
@@ -255,20 +522,17 @@
             }
         }
 
-        // Update player paddle position with keyboard or touch
         function updatePlayerPaddle() {
             if (playerPaddle.stunned > 0) {
                 playerPaddle.stunned--;
                 return;
             }
 
-            // Smooth movement towards target Y (for touch/mouse)
             if (playerPaddle.targetY !== undefined) {
                 const diff = playerPaddle.targetY - playerPaddle.y;
-                playerPaddle.y += diff * 0.3; // Smooth interpolation
+                playerPaddle.y += diff * 0.3;
             }
 
-            // Keyboard controls
             if (keys['ArrowUp'] || keys['w']) {
                 playerPaddle.y -= playerPaddle.speed;
             }
@@ -279,7 +543,6 @@
             constrainPaddle(playerPaddle);
         }
 
-        // Update computer paddle (AI)
         function updateComputerPaddle() {
             if (computerPaddle.stunned > 0) {
                 computerPaddle.stunned--;
@@ -289,7 +552,6 @@
             const computerCenter = computerPaddle.y + paddleHeight / 2;
             const ballCenter = ball.y;
 
-            // Simple AI: move towards the ball
             if (computerCenter < ballCenter - 35) {
                 computerPaddle.y += computerPaddle.speed;
             } else if (computerCenter > ballCenter + 35) {
@@ -299,7 +561,6 @@
             constrainPaddle(computerPaddle);
         }
 
-        // Update ball position
         function updateBall() {
             let speedMultiplier = 1;
             if (ball.slowedDuration > 0) {
@@ -310,13 +571,11 @@
             ball.x += ball.dx * speedMultiplier;
             ball.y += ball.dy * speedMultiplier;
 
-            // Ball collision with top and bottom walls
             if (ball.y - ball.size < 0 || ball.y + ball.size > canvas.height) {
                 ball.dy = -ball.dy;
                 ball.y = Math.max(ball.size, Math.min(canvas.height - ball.size, ball.y));
             }
 
-            // Ball collision with left and right walls (scoring)
             if (ball.x - ball.size < 0) {
                 computerScore++;
                 resetBall();
@@ -326,14 +585,12 @@
                 resetBall();
             }
 
-            // Ball collision with player paddle
             if (
                 ball.x - ball.size < playerPaddle.x + playerPaddle.width &&
                 ball.y > playerPaddle.y &&
                 ball.y < playerPaddle.y + playerPaddle.height
             ) {
                 if (ball.onFire) {
-                    // Fire ball - don't hit it, get stunned instead
                     playerPaddle.stunned = 120;
                     disasterInfo.textContent = "🔥 Player hit fire ball! STUNNED for 2 seconds!";
                     ball.onFire = false;
@@ -344,14 +601,12 @@
                 }
             }
 
-            // Ball collision with computer paddle
             if (
                 ball.x + ball.size > computerPaddle.x &&
                 ball.y > computerPaddle.y &&
                 ball.y < computerPaddle.y + computerPaddle.height
             ) {
                 if (ball.onFire) {
-                    // Fire ball - don't hit it, get stunned instead
                     computerPaddle.stunned = 120;
                     disasterInfo.textContent = "🔥 Computer hit fire ball! STUNNED for 2 seconds!";
                     ball.onFire = false;
@@ -362,7 +617,6 @@
                 }
             }
 
-            // Cap ball speed
             const maxSpeed = 8;
             if (Math.abs(ball.dx) > maxSpeed) {
                 ball.dx = (ball.dx / Math.abs(ball.dx)) * maxSpeed;
@@ -372,7 +626,6 @@
             }
         }
 
-        // Reset ball to center
         function resetBall() {
             ball.x = canvas.width / 2;
             ball.y = canvas.height / 2;
@@ -380,14 +633,12 @@
             ball.dy = (Math.random() - 0.5) * 8;
             ball.onFire = false;
 
-            // Update score display
             document.getElementById('playerScore').textContent = playerScore;
             document.getElementById('computerScore').textContent = computerScore;
 
             disasterInfo.textContent = '';
         }
 
-        // Disaster system
         class Tornado {
             constructor(x) {
                 this.x = x;
@@ -505,24 +756,19 @@
         let currentFire = null;
         let currentTsunami = null;
 
-        // Spawn natural disasters randomly
         function spawnDisaster() {
             const rand = Math.random();
             if (rand < 0.25) {
-                // Tornado
                 disasters.push(new Tornado(Math.random() < 0.5 ? 100 : canvas.width - 100));
                 disasterInfo.textContent = '🌪️ Tornado incoming!';
             } else if (rand < 0.5) {
-                // Earthquake
                 currentEarthquake = new Earthquake();
                 disasterInfo.textContent = '🌍 Earthquake strikes!';
             } else if (rand < 0.75) {
-                // Fire
                 ball.onFire = true;
                 currentFire = new Fire();
                 disasterInfo.textContent = '🔥 Ball on fire! Avoid it!';
             } else {
-                // Tsunami
                 tsunamiActive = true;
                 tsunamiSlowDuration = 240;
                 currentTsunami = new Tsunami();
@@ -531,14 +777,11 @@
             }
         }
 
-        // Update all disasters
         function updateDisasters() {
-            // Tornadoes
             disasters = disasters.filter(t => t.life > 0);
             disasters.forEach(tornado => {
                 tornado.update();
 
-                // Check collision with paddles
                 if (tornado.checkPaddleCollision(playerPaddle)) {
                     playerPaddle.stunned = 120;
                     disasterInfo.textContent = '🌪️ Player hit by tornado! STUNNED!';
@@ -548,32 +791,27 @@
                     disasterInfo.textContent = '🌪️ Computer hit by tornado! STUNNED!';
                 }
 
-                // Tornado affects ball trajectory
                 if (tornado.checkBallCollision(ball)) {
                     ball.dx += (Math.random() - 0.5) * 4;
                     ball.dy += (Math.random() - 0.5) * 4;
                 }
             });
 
-            // Earthquake
             if (currentEarthquake) {
                 currentEarthquake.update();
                 currentEarthquake.applyShake(playerPaddle);
                 currentEarthquake.applyShake(computerPaddle);
             }
 
-            // Fire
             if (currentFire) {
                 currentFire.update();
             }
 
-            // Tsunami
             if (currentTsunami) {
                 currentTsunami.update();
             }
         }
 
-        // Draw functions
         function drawPaddle(paddle) {
             ctx.save();
             if (paddle.shaking) {
@@ -610,40 +848,57 @@
         }
 
         function draw() {
-            // Clear canvas
             ctx.fillStyle = '#000';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-            // Draw game elements
             drawCenter();
             drawPaddle(playerPaddle);
             drawPaddle(computerPaddle);
             drawBall();
 
-            // Draw disasters
             disasters.forEach(tornado => tornado.draw());
             if (currentFire) currentFire.draw();
             if (currentTsunami) currentTsunami.draw();
         }
 
-        // Main game loop
+        // Skip cutscene function
+        function skipCutscene() {
+            gameState = GAME_STATE.PLAYING;
+            cutsceneTime = 0;
+            skipButton.style.display = 'none';
+        }
+
+        skipButton.addEventListener('click', skipCutscene);
+
         let gameFrames = 0;
         function gameLoop() {
-            updatePlayerPaddle();
-            updateComputerPaddle();
-            updateBall();
-            updateDisasters();
+            if (gameState === GAME_STATE.CUTSCENE) {
+                drawCutscene();
+                cutsceneTime++;
+                skipButton.style.display = 'block';
 
-            gameFrames++;
-            if (gameFrames % 300 === 0) {
-                spawnDisaster();
+                if (cutsceneTime >= 480) {
+                    gameState = GAME_STATE.PLAYING;
+                    skipButton.style.display = 'none';
+                }
+            } else {
+                updatePlayerPaddle();
+                updateComputerPaddle();
+                updateBall();
+                updateDisasters();
+
+                gameFrames++;
+                if (gameFrames % 300 === 0) {
+                    spawnDisaster();
+                }
+
+                draw();
             }
 
-            draw();
             requestAnimationFrame(gameLoop);
         }
 
-        // Start game
+        // Start game with cutscene
         gameLoop();
     </script>
 </body>
