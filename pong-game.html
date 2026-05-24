@@ -68,6 +68,13 @@
         .instructions p {
             margin: 5px 0;
         }
+
+        .disaster-info {
+            color: #ffff00;
+            margin-top: 10px;
+            font-size: 0.85em;
+            min-height: 60px;
+        }
     </style>
 </head>
 <body>
@@ -82,11 +89,13 @@
             <p><strong>Controls:</strong> Use Mouse Y-position or Arrow Keys UP/DOWN to move your paddle</p>
             <p>First to 11 points wins!</p>
         </div>
+        <div class="disaster-info" id="disasterInfo">Natural disasters incoming! Avoid tornadoes 🌪️, earthquakes 🌍, fire 🔥, and tsunamis 🌊</div>
     </div>
 
     <script>
         const canvas = document.getElementById('pongCanvas');
         const ctx = canvas.getContext('2d');
+        const disasterInfo = document.getElementById('disasterInfo');
 
         // Game objects
         const paddleWidth = 10;
@@ -100,7 +109,10 @@
             width: paddleWidth,
             height: paddleHeight,
             dy: 0,
-            speed: 6
+            speed: 6,
+            stunned: 0,
+            shaking: 0,
+            shakingIntensity: 0
         };
 
         // Computer paddle (right side)
@@ -109,7 +121,10 @@
             y: canvas.height / 2 - paddleHeight / 2,
             width: paddleWidth,
             height: paddleHeight,
-            speed: 5
+            speed: 5,
+            stunned: 0,
+            shaking: 0,
+            shakingIntensity: 0
         };
 
         // Ball
@@ -119,8 +134,15 @@
             dx: 5,
             dy: 5,
             size: ballSize,
-            speed: 5
+            speed: 5,
+            onFire: false,
+            slowedDuration: 0
         };
+
+        // Disasters array
+        let disasters = [];
+        let tsunamiActive = false;
+        let tsunamiSlowDuration = 0;
 
         // Score
         let playerScore = 0;
@@ -139,7 +161,9 @@
         document.addEventListener('mousemove', (e) => {
             const rect = canvas.getBoundingClientRect();
             const mouseY = e.clientY - rect.top;
-            playerPaddle.y = mouseY - paddleHeight / 2;
+            if (playerPaddle.stunned <= 0) {
+                playerPaddle.y = mouseY - paddleHeight / 2;
+            }
         });
 
         // Constrain paddle to canvas
@@ -154,6 +178,11 @@
 
         // Update player paddle position with keyboard
         function updatePlayerPaddle() {
+            if (playerPaddle.stunned > 0) {
+                playerPaddle.stunned--;
+                return;
+            }
+
             if (keys['ArrowUp'] || keys['w']) {
                 playerPaddle.y -= playerPaddle.speed;
             }
@@ -165,6 +194,11 @@
 
         // Update computer paddle (AI)
         function updateComputerPaddle() {
+            if (computerPaddle.stunned > 0) {
+                computerPaddle.stunned--;
+                return;
+            }
+
             const computerCenter = computerPaddle.y + paddleHeight / 2;
             const ballCenter = ball.y;
 
@@ -180,8 +214,14 @@
 
         // Update ball position
         function updateBall() {
-            ball.x += ball.dx;
-            ball.y += ball.dy;
+            let speedMultiplier = 1;
+            if (ball.slowedDuration > 0) {
+                speedMultiplier = 0.4;
+                ball.slowedDuration--;
+            }
+
+            ball.x += ball.dx * speedMultiplier;
+            ball.y += ball.dy * speedMultiplier;
 
             // Ball collision with top and bottom walls
             if (ball.y - ball.size < 0 || ball.y + ball.size > canvas.height) {
@@ -205,10 +245,16 @@
                 ball.y > playerPaddle.y &&
                 ball.y < playerPaddle.y + playerPaddle.height
             ) {
-                ball.dx = -ball.dx;
-                ball.x = playerPaddle.x + playerPaddle.width + ball.size;
-                // Add spin based on where ball hits paddle
-                ball.dy += (ball.y - (playerPaddle.y + paddleHeight / 2)) * 0.1;
+                if (ball.onFire) {
+                    // Fire ball - don't hit it, get stunned instead
+                    playerPaddle.stunned = 120;
+                    disasterInfo.textContent = "🔥 Player hit fire ball! STUNNED for 2 seconds!";
+                    ball.onFire = false;
+                } else {
+                    ball.dx = -ball.dx;
+                    ball.x = playerPaddle.x + playerPaddle.width + ball.size;
+                    ball.dy += (ball.y - (playerPaddle.y + paddleHeight / 2)) * 0.1;
+                }
             }
 
             // Ball collision with computer paddle
@@ -217,10 +263,16 @@
                 ball.y > computerPaddle.y &&
                 ball.y < computerPaddle.y + computerPaddle.height
             ) {
-                ball.dx = -ball.dx;
-                ball.x = computerPaddle.x - ball.size;
-                // Add spin based on where ball hits paddle
-                ball.dy += (ball.y - (computerPaddle.y + paddleHeight / 2)) * 0.1;
+                if (ball.onFire) {
+                    // Fire ball - don't hit it, get stunned instead
+                    computerPaddle.stunned = 120;
+                    disasterInfo.textContent = "🔥 Computer hit fire ball! STUNNED for 2 seconds!";
+                    ball.onFire = false;
+                } else {
+                    ball.dx = -ball.dx;
+                    ball.x = computerPaddle.x - ball.size;
+                    ball.dy += (ball.y - (computerPaddle.y + paddleHeight / 2)) * 0.1;
+                }
             }
 
             // Cap ball speed
@@ -239,23 +291,225 @@
             ball.y = canvas.height / 2;
             ball.dx = (Math.random() > 0.5 ? 1 : -1) * 5;
             ball.dy = (Math.random() - 0.5) * 8;
+            ball.onFire = false;
 
             // Update score display
             document.getElementById('playerScore').textContent = playerScore;
             document.getElementById('computerScore').textContent = computerScore;
+
+            disasterInfo.textContent = '';
+        }
+
+        // Disaster system
+        class Tornado {
+            constructor(x) {
+                this.x = x;
+                this.y = Math.random() * (canvas.height - 80) + 40;
+                this.width = 30;
+                this.height = 80;
+                this.vx = x < canvas.width / 2 ? 2 : -2;
+                this.rotation = 0;
+                this.life = 300;
+            }
+
+            update() {
+                this.x += this.vx;
+                this.rotation += 0.3;
+                this.life--;
+            }
+
+            draw() {
+                ctx.save();
+                ctx.translate(this.x, this.y);
+                ctx.rotate(this.rotation);
+                ctx.fillStyle = 'rgba(100, 150, 255, 0.6)';
+                ctx.fillRect(-this.width / 2, -this.height / 2, this.width, this.height);
+                ctx.restore();
+            }
+
+            checkPaddleCollision(paddle) {
+                return (
+                    this.x > paddle.x - this.width / 2 &&
+                    this.x < paddle.x + paddle.width + this.width / 2 &&
+                    this.y > paddle.y - this.height / 2 &&
+                    this.y < paddle.y + paddle.height + this.height / 2
+                );
+            }
+
+            checkBallCollision(ball) {
+                return (
+                    Math.abs(this.x - ball.x) < this.width / 2 + ball.size &&
+                    Math.abs(this.y - ball.y) < this.height / 2 + ball.size
+                );
+            }
+        }
+
+        class Fire {
+            constructor() {
+                this.duration = 200;
+                this.active = true;
+            }
+
+            update() {
+                this.duration--;
+                if (this.duration <= 0) {
+                    this.active = false;
+                    ball.onFire = false;
+                }
+            }
+
+            draw() {
+                if (ball.onFire) {
+                    ctx.fillStyle = '#ff6600';
+                    ctx.beginPath();
+                    ctx.arc(ball.x, ball.y, ball.size + 5, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            }
+        }
+
+        class Earthquake {
+            constructor() {
+                this.duration = 150;
+                this.intensity = 1;
+            }
+
+            update() {
+                this.duration--;
+                if (this.duration <= 0) {
+                    this.intensity = 0;
+                }
+            }
+
+            applyShake(paddle) {
+                if (this.intensity > 0) {
+                    paddle.shaking = Math.sin(this.duration * 0.3) * 15 * this.intensity;
+                    paddle.shakingIntensity = this.intensity;
+                }
+            }
+        }
+
+        class Tsunami {
+            constructor() {
+                this.duration = 240;
+            }
+
+            update() {
+                this.duration--;
+                if (this.duration <= 0) {
+                    tsunamiActive = false;
+                    tsunamiSlowDuration = 0;
+                    disasterInfo.textContent = '🌊 Tsunami passed!';
+                }
+            }
+
+            draw() {
+                ctx.fillStyle = 'rgba(30, 144, 255, 0.3)';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                ctx.strokeStyle = 'rgba(30, 144, 255, 0.6)';
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.arc(canvas.width / 2, canvas.height / 2, 150 - this.duration / 2, 0, Math.PI * 2);
+                ctx.stroke();
+            }
+        }
+
+        let currentEarthquake = null;
+        let currentFire = null;
+        let currentTsunami = null;
+
+        // Spawn natural disasters randomly
+        function spawnDisaster() {
+            const rand = Math.random();
+            if (rand < 0.25) {
+                // Tornado
+                disasters.push(new Tornado(Math.random() < 0.5 ? 100 : canvas.width - 100));
+                disasterInfo.textContent = '🌪️ Tornado incoming!';
+            } else if (rand < 0.5) {
+                // Earthquake
+                currentEarthquake = new Earthquake();
+                disasterInfo.textContent = '🌍 Earthquake strikes!';
+            } else if (rand < 0.75) {
+                // Fire
+                ball.onFire = true;
+                currentFire = new Fire();
+                disasterInfo.textContent = '🔥 Ball on fire! Avoid it!';
+            } else {
+                // Tsunami
+                tsunamiActive = true;
+                tsunamiSlowDuration = 240;
+                currentTsunami = new Tsunami();
+                ball.slowedDuration = 240;
+                disasterInfo.textContent = '🌊 Tsunami! Everything slows down!';
+            }
+        }
+
+        // Update all disasters
+        function updateDisasters() {
+            // Tornadoes
+            disasters = disasters.filter(t => t.life > 0);
+            disasters.forEach(tornado => {
+                tornado.update();
+
+                // Check collision with paddles
+                if (tornado.checkPaddleCollision(playerPaddle)) {
+                    playerPaddle.stunned = 120;
+                    disasterInfo.textContent = '🌪️ Player hit by tornado! STUNNED!';
+                }
+                if (tornado.checkPaddleCollision(computerPaddle)) {
+                    computerPaddle.stunned = 120;
+                    disasterInfo.textContent = '🌪️ Computer hit by tornado! STUNNED!';
+                }
+
+                // Tornado affects ball trajectory
+                if (tornado.checkBallCollision(ball)) {
+                    ball.dx += (Math.random() - 0.5) * 4;
+                    ball.dy += (Math.random() - 0.5) * 4;
+                }
+            });
+
+            // Earthquake
+            if (currentEarthquake) {
+                currentEarthquake.update();
+                currentEarthquake.applyShake(playerPaddle);
+                currentEarthquake.applyShake(computerPaddle);
+            }
+
+            // Fire
+            if (currentFire) {
+                currentFire.update();
+            }
+
+            // Tsunami
+            if (currentTsunami) {
+                currentTsunami.update();
+            }
         }
 
         // Draw functions
         function drawPaddle(paddle) {
-            ctx.fillStyle = '#fff';
+            ctx.save();
+            if (paddle.shaking) {
+                ctx.translate(paddle.shaking, 0);
+            }
+            ctx.fillStyle = paddle.stunned > 0 ? '#ff6600' : '#fff';
             ctx.fillRect(paddle.x, paddle.y, paddle.width, paddle.height);
+            ctx.restore();
         }
 
         function drawBall() {
-            ctx.fillStyle = '#fff';
+            ctx.fillStyle = ball.onFire ? '#ff6600' : '#fff';
             ctx.beginPath();
             ctx.arc(ball.x, ball.y, ball.size, 0, Math.PI * 2);
             ctx.fill();
+
+            if (ball.onFire) {
+                ctx.strokeStyle = '#ffaa00';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.arc(ball.x, ball.y, ball.size + 3, 0, Math.PI * 2);
+                ctx.stroke();
+            }
         }
 
         function drawCenter() {
@@ -278,13 +532,26 @@
             drawPaddle(playerPaddle);
             drawPaddle(computerPaddle);
             drawBall();
+
+            // Draw disasters
+            disasters.forEach(tornado => tornado.draw());
+            if (currentFire) currentFire.draw();
+            if (currentTsunami) currentTsunami.draw();
         }
 
         // Main game loop
+        let gameFrames = 0;
         function gameLoop() {
             updatePlayerPaddle();
             updateComputerPaddle();
             updateBall();
+            updateDisasters();
+
+            gameFrames++;
+            if (gameFrames % 300 === 0) {
+                spawnDisaster();
+            }
+
             draw();
             requestAnimationFrame(gameLoop);
         }
