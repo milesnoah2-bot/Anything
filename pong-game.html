@@ -2,13 +2,24 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <title>Pong Game</title>
     <style>
         * {
             margin: 0;
             padding: 0;
             box-sizing: border-box;
+            -webkit-touch-callout: none;
+            -webkit-user-select: none;
+            user-select: none;
+        }
+
+        html, body {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
         }
 
         body {
@@ -22,12 +33,18 @@
 
         .container {
             text-align: center;
+            width: 100%;
+            max-width: 90vw;
+            padding: 10px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
         }
 
         h1 {
             color: white;
-            margin-bottom: 20px;
-            font-size: 2.5em;
+            margin-bottom: 15px;
+            font-size: clamp(1.5em, 5vw, 2.5em);
             text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
         }
 
@@ -35,33 +52,36 @@
             background-color: #000;
             border: 3px solid #fff;
             display: block;
-            margin: 0 auto;
+            max-width: 100%;
+            height: auto;
             box-shadow: 0 0 20px rgba(255, 255, 255, 0.3);
+            touch-action: none;
         }
 
         .scoreboard {
             color: white;
-            font-size: 2em;
-            margin-top: 20px;
+            font-size: clamp(1em, 4vw, 2em);
+            margin-top: 15px;
             font-weight: bold;
             text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+            display: flex;
+            gap: 20px;
+            justify-content: center;
+            flex-wrap: wrap;
         }
 
         .player-score {
             color: #00ff00;
-            display: inline-block;
-            margin-right: 50px;
         }
 
         .computer-score {
             color: #ff0000;
-            display: inline-block;
         }
 
         .instructions {
             color: white;
-            margin-top: 20px;
-            font-size: 0.9em;
+            margin-top: 15px;
+            font-size: clamp(0.7em, 2.5vw, 0.9em);
             opacity: 0.8;
         }
 
@@ -72,21 +92,40 @@
         .disaster-info {
             color: #ffff00;
             margin-top: 10px;
-            font-size: 0.85em;
-            min-height: 60px;
+            font-size: clamp(0.75em, 2vw, 0.85em);
+            min-height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                padding: 5px;
+            }
+
+            .scoreboard {
+                font-size: 1.2em;
+                gap: 15px;
+            }
+
+            .instructions p {
+                font-size: 0.75em;
+            }
         }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>🎮 PONG GAME 🎮</h1>
-        <canvas id="pongCanvas" width="800" height="400"></canvas>
+        <canvas id="pongCanvas"></canvas>
         <div class="scoreboard">
-            <div class="player-score">Player (Left): <span id="playerScore">0</span></div>
-            <div class="computer-score">Computer (Right): <span id="computerScore">0</span></div>
+            <div class="player-score">Player: <span id="playerScore">0</span></div>
+            <div class="computer-score">Computer: <span id="computerScore">0</span></div>
         </div>
         <div class="instructions">
-            <p><strong>Controls:</strong> Use Mouse Y-position or Arrow Keys UP/DOWN to move your paddle</p>
+            <p><strong>Desktop:</strong> Mouse or Arrow Keys UP/DOWN</p>
+            <p><strong>Mobile:</strong> Tap & drag up/down</p>
             <p>First to 11 points wins!</p>
         </div>
         <div class="disaster-info" id="disasterInfo">Natural disasters incoming! Avoid tornadoes 🌪️, earthquakes 🌍, fire 🔥, and tsunamis 🌊</div>
@@ -96,6 +135,27 @@
         const canvas = document.getElementById('pongCanvas');
         const ctx = canvas.getContext('2d');
         const disasterInfo = document.getElementById('disasterInfo');
+
+        // Responsive canvas sizing
+        function resizeCanvas() {
+            const maxWidth = Math.min(window.innerWidth - 20, 800);
+            const maxHeight = Math.min(window.innerHeight - 280, 400);
+            const ratio = 2; // width to height ratio
+            
+            if (maxWidth / ratio <= maxHeight) {
+                canvas.width = maxWidth;
+                canvas.height = maxWidth / ratio;
+            } else {
+                canvas.height = maxHeight;
+                canvas.width = maxHeight * ratio;
+            }
+        }
+
+        resizeCanvas();
+        window.addEventListener('resize', resizeCanvas);
+        window.addEventListener('orientationchange', () => {
+            setTimeout(resizeCanvas, 100);
+        });
 
         // Game objects
         const paddleWidth = 10;
@@ -112,7 +172,8 @@
             speed: 6,
             stunned: 0,
             shaking: 0,
-            shakingIntensity: 0
+            shakingIntensity: 0,
+            targetY: canvas.height / 2 - paddleHeight / 2
         };
 
         // Computer paddle (right side)
@@ -157,12 +218,30 @@
             keys[e.key] = false;
         });
 
-        // Mouse input
+        // Touch input for mobile
+        let touchStartY = 0;
+        let touchEndY = 0;
+
+        canvas.addEventListener('touchstart', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            touchStartY = e.touches[0].clientY - rect.top;
+            playerPaddle.targetY = touchStartY - paddleHeight / 2;
+        }, false);
+
+        canvas.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+            const rect = canvas.getBoundingClientRect();
+            const touchY = e.touches[0].clientY - rect.top;
+            playerPaddle.targetY = touchY - paddleHeight / 2;
+        }, false);
+
+        // Mouse input for desktop
         document.addEventListener('mousemove', (e) => {
+            if (!canvas.getBoundingClientRect) return;
             const rect = canvas.getBoundingClientRect();
             const mouseY = e.clientY - rect.top;
-            if (playerPaddle.stunned <= 0) {
-                playerPaddle.y = mouseY - paddleHeight / 2;
+            if (mouseY >= 0 && mouseY <= canvas.height) {
+                playerPaddle.targetY = mouseY - paddleHeight / 2;
             }
         });
 
@@ -176,19 +255,27 @@
             }
         }
 
-        // Update player paddle position with keyboard
+        // Update player paddle position with keyboard or touch
         function updatePlayerPaddle() {
             if (playerPaddle.stunned > 0) {
                 playerPaddle.stunned--;
                 return;
             }
 
+            // Smooth movement towards target Y (for touch/mouse)
+            if (playerPaddle.targetY !== undefined) {
+                const diff = playerPaddle.targetY - playerPaddle.y;
+                playerPaddle.y += diff * 0.3; // Smooth interpolation
+            }
+
+            // Keyboard controls
             if (keys['ArrowUp'] || keys['w']) {
                 playerPaddle.y -= playerPaddle.speed;
             }
             if (keys['ArrowDown'] || keys['s']) {
                 playerPaddle.y += playerPaddle.speed;
             }
+
             constrainPaddle(playerPaddle);
         }
 
